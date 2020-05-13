@@ -24,3 +24,6 @@ This project also includes
 - xoroshiro256 1.0, written in 2018 by David Blackman and Sebastiano
   Vigna (vigna@acm.org) and dedicated to the public domain
   (http://creativecommons.org/publicdomain/zero/1.0/)
+
+- Systemtap's "sys/sdt.h", dedicated to the public domain
+  (http://creativecommons.org/publicdomain/zero/1.0/)

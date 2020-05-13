@@ -1,11 +1,16 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/sdt.h>
 
 #include "cc.h"
+#include "sample.h"
+
+static __thread struct sample_state sample_state;
 
 /* SPDX-License-Identifier: MIT */
 
@@ -37,7 +42,7 @@ FOREACH_WRAPPED(REDIRECT);
 /*
  * Returns true if the pointers were all successfully patched.
  */
-NOINLINE static bool
+static COLD NOINLINE bool
 init_shim(void)
 {
 	/*
@@ -60,7 +65,7 @@ init_shim(void)
 	return true;
 }
 
-static void
+static COLD void
 dummy_free(void *ptr)
 {
 
@@ -74,7 +79,7 @@ dummy_free(void *ptr)
 	return;
 }
 
-static void *
+static COLD void *
 dummy_realloc(void *ptr, size_t request)
 {
 
@@ -83,7 +88,7 @@ dummy_realloc(void *ptr, size_t request)
 	return NULL;
 }
 
-static void *
+static COLD void *
 dummy_malloc(size_t request)
 {
 
@@ -92,7 +97,7 @@ dummy_malloc(size_t request)
 	return NULL;
 }
 
-static void *
+static COLD void *
 dummy_calloc(size_t num, size_t size)
 {
 
@@ -101,7 +106,7 @@ dummy_calloc(size_t num, size_t size)
 	return NULL;
 }
 
-EXPORT NOINLINE void
+EXPORT HOT NOINLINE void
 free(void *ptr)
 {
 
@@ -109,23 +114,73 @@ free(void *ptr)
 	return;
 }
 
-EXPORT NOINLINE void *
+static COLD NOINLINE void *
+sampled_realloc(void *ptr, size_t request)
+{
+
+	if (sample_request_reset(&sample_state))
+		return realloc(ptr, request);
+
+	DTRACE_PROBE2(libpoireau, realloc, ptr, request);
+	return base_realloc(ptr, request);
+}
+
+EXPORT HOT NOINLINE void *
 realloc(void *ptr, size_t request)
 {
+
+	if (UNLIKELY(sample_request(&sample_state, request)))
+		return sampled_realloc(ptr, request);
 
 	return base_realloc(ptr, request);
 }
 
-EXPORT NOINLINE void *
+static COLD NOINLINE void *
+sampled_malloc(size_t request)
+{
+
+	if (sample_request_reset(&sample_state))
+		return malloc(request);
+
+	DTRACE_PROBE1(libpoireau, malloc, request);
+	return base_malloc(request);
+}
+
+EXPORT HOT NOINLINE void *
 malloc(size_t request)
 {
+
+	if (UNLIKELY(sample_request(&sample_state, request)))
+		return sampled_malloc(request);
 
 	return base_malloc(request);
 }
 
-EXPORT NOINLINE void *
+static COLD NOINLINE void *
+sampled_calloc(size_t num, size_t size)
+{
+	size_t req;
+
+	if (sample_request_reset(&sample_state))
+		return calloc(num, size);
+
+	if (__builtin_umull_overflow(num, size, &req)) {
+		DTRACE_PROBE2(libpoireau, calloc_overflow, num, size);
+		return NULL;
+	}
+
+	DTRACE_PROBE2(libpoireau, calloc, num, size);
+	return base_calloc(1, req);
+}
+
+EXPORT HOT NOINLINE void *
 calloc(size_t num, size_t size)
 {
+	size_t req;
 
-	return base_calloc(num, size);
+	if (UNLIKELY(__builtin_umull_overflow(num, size, &req) ||
+	    sample_request(&sample_state, req)))
+		return sampled_calloc(num, size);
+
+	return base_calloc(1, req);
 }
