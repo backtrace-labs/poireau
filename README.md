@@ -12,9 +12,9 @@ How to build libpoireau
 -----------------------
 
 libpoireau currently targets Linux 4.8+ (for statically defined
-tracepoint support) on 64 bit platforms.  Execute `make.sh` to create
-`libpoireau.so` in the current directory; the code requires a
-GCC-compatible C11 implementation.
+tracepoint support) on 64 bit platforms with 4 KB pages.  Execute
+`make.sh` to create `libpoireau.so` in the current directory; the code
+requires a GCC-compatible C11 implementation.
 
 How to use libpoireau
 ---------------------
@@ -80,6 +80,13 @@ sampling, libpoireau executes code that is instrumented with USDT
 that code to generate events (this is a system-wide switch, for every
 process that linked the shared library); we use these events to let
 the kernel capture callstacks for each sampled call.
+
+In addition, these allocation requests are diverted to an internal
+tracking allocator.  This lets us identify calls to `free` and
+`realloc` on tracked allocations, which is crucial to generate paired
+USDT events ("this allocation was freed or reallocated"); it also
+ensures we pass these allocations back to the backup tracking
+allocator, rather than the system malloc.
 
 Vendored dependencies
 ---------------------

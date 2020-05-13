@@ -3,7 +3,7 @@
 BASE=$(dirname $(readlink -f "$0"))
 SRC="$BASE/src"
 
-SOURCES="$SRC/sample.c $SRC/shim.c"
+SOURCES="$SRC/sample.c $SRC/shim.c $SRC/tracked_alloc.c"
 
 ${CC:-cc} -std=gnu11 -D_GNU_SOURCE -g -ggdb -O2 -fPIC -W -Wall \
 	  -flto -fvisibility=hidden -fno-semantic-interposition\
