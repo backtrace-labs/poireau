@@ -20,3 +20,40 @@ How to use libpoireau
 
 Add `LD_PRELOAD="$LD_PRELOAD:$path_to_libpoireau.so"` to the
 environment before executing the program you wish to debug.
+
+How does it work?
+-----------------
+
+When `LD_PRELOAD`ed, libpoireau intercepts every call to
+`malloc`/`calloc`/`realloc`/`free`, and quickly forwards the vast
+majority of calls to the real implementation that would be used if
+libpoireau were absent.
+
+Only those allocations that are marked for sampling are diverted, in
+the case of `malloc` and `calloc`, and `free` is overridden iff called
+on an allocation that was diverted.  Finally, `realloc` is treated as
+a pair of `malloc` and `free`, for sampling purposes.
+
+The sampling logic simulates a process that samples each allocated
+byte with equal probability.  The (hardcoded) sampling rate aims for
+an average of sampling one allocation every 32 MB; for example, we an
+allocation request for 100 bytes becomes part of the sample with the
+same probability as if we had flipped 100 times a biased coin that
+lands on "head" with probability `1/(32 * 1024 * 1024)`, and decided to
+make the request part of the sample if any of these coin flip had
+landed on "head."
+
+This memory-less sampling strategy makes it possible to derive
+statistical bounds on the shape of heap allocation calls, even with an
+adversarial workload.  However, a naive implementation is slow.
+Rather than flipping biased coins for each allocated byte, we instead
+generate the number of consecutive "tails" results by generating
+values from an Exponential distribution.
+
+Vendored dependencies
+---------------------
+
+libpoireau includes code derived from
+[xoroshiro 256+ 1.0](http://prng.di.unimi.it/xoshiro256plus.c),
+written in 2018 by David Blackman and Sebastiano Vigna (vigna@acm.org)
+and [dedicated to the public domain](http://creativecommons.org/publicdomain/zero/1.0/).

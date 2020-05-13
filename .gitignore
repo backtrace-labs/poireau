@@ -4,3 +4,4 @@
 *.swp
 *.swo
 libpoireau.so
+test_*
