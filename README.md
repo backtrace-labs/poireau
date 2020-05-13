@@ -33,7 +33,40 @@ We can now enable the tracepoints to generate perf events whenever
 `libpoireau` overrides a stdlib call.
 
     sudo perf probe sdt_libpoireau:*
-    sudo perf record -e sdt_libpoireau:* --call-graph=dwarf -p ...  # record events
+
+That's enough for Linux `perf` to report these events, e.g., in `perf
+top`.  However, that's a lot of information, not necessarily useful.
+
+Execute `scripts/poireau.sh $PID` to start `perf trace` on that `PID`,
+and feed the output to an allocation tracking script.  Every 10
+minutes, that script will dump a list of currently live old (> 5
+minutes) sampled allocations.  Send `poireau.py` a `HUP` signal to
+instead get a list of all live sampled allocations.  Old allocations
+will eventually fill up with known leaks, or startup allocations;
+remove all current old allocations from future reports by sending a
+`USR1` signal to `poireau.py`.
+
+A key advantage of having the analysis out of process is that we can
+still provide information after a crash.  Send a `USR2` signal to
+`poireau.py` to list some recent calls to `free` or `realloc`, on the
+off chance that it will help debug a use-after-free.
+
+Perf often needs `sudo` access, but it doesn't make sense to run all
+of `poireau.py` as root; `poireau.sh` instead executes only `perf`
+with sudo.  In order to override the `perf` binary under `sudo`,
+use `PERF=`which perf` scripts/poireau.sh ...`.
+
+You may also enable system-wide tracing by invoking `poireau.sh`
+without any argument.  This is mostly useful if only one process at a
+time will ever `LD_PRELOAD` `libpoireau.so`: the analysis code in
+`poireau.py` does not currently tell processes apart when matching
+allocations and frees (edit the global `COMM` pattern in `poireau.py`
+to only ingest events from programs that match a certain regex).
+System-wide tracing makes it easier to track events that happen
+immediately on program startup.
+
+How to cleanup after enabling libpoireau
+----------------------------------------
 
 Disable the tracepoints with
 
@@ -44,6 +77,10 @@ and remove libpoireau from `perf`'s cache with
     sudo perf buildid-cache --remove ./libpoireau.so
 
 to erase all traces of libpoireau from the `perf` subsystem.
+
+If you had to edit an init script to insert the `LD_PRELOAD` variable
+before executing a program, it makes sense to undo the edit and
+restart the instrumented program as soon as possible.
 
 How does it work?
 -----------------
