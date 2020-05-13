@@ -17,6 +17,16 @@
 static uint64_t alloc_id_counter = 1;
 
 /**
+ * We multiply alloc_ids by the multiplier constant, modulo the
+ * location_mod to provide a "hint" location to mmap.  The hint is
+ * semantically a no-op, so does not affect correctness.  We use it to
+ * heuristically make sure we reuse addresses rarely, making it easier
+ * to detect use-after-free.
+ */
+static const uintptr_t mmap_location_mod = 1UL << 47;
+static const uintptr_t mmap_location_multiplier = 17ULL << 30;
+
+/**
  * We use parallel arrays to let the fast path (tracked_alloc_p) use
  * simple addressing.
  */
@@ -27,6 +37,13 @@ static struct tracked_alloc_info info_table[ADDRESS_SPACE_MAX / TRACKING_ALIGNME
  * We rely on the kernel, via mmap, for mutual exclusion in the tables above.
  */
 
+static void *
+mmap_hint(uint64_t id)
+{
+	uintptr_t ret = (id * mmap_location_multiplier) % mmap_location_mod;
+
+	return (void *)(ret & -PAGE_SIZE);
+}
 /**
  * Returns a fresh mapping of `size` bytes (rounded up to a page size),
  * aligned to `alignment`, which must be a power of two.
@@ -34,7 +51,7 @@ static struct tracked_alloc_info info_table[ADDRESS_SPACE_MAX / TRACKING_ALIGNME
  * Returns NULL on failure;
  */
 static void *
-aligned_mmap(size_t size, size_t alignment)
+aligned_mmap(uint64_t id, size_t size, size_t alignment)
 {
 	size_t rounded_size = (size + PAGE_SIZE - 1) & -PAGE_SIZE;
 	size_t padded_size = rounded_size + alignment;
@@ -46,7 +63,8 @@ aligned_mmap(size_t size, size_t alignment)
 
 	if (size > SSIZE_MAX)
 		return NULL;
-	map = mmap(NULL, padded_size,
+
+	map = mmap(mmap_hint(id), padded_size,
 		  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
 		  -1, 0);
 	if (map == MAP_FAILED) {
@@ -99,12 +117,12 @@ tracked_alloc_get(size_t request, uint64_t *OUT_id)
 	size_t index;
 
 	*OUT_id = 0;
-	alloc = aligned_mmap(request, TRACKING_ALIGNMENT);
+	id = __atomic_fetch_add(&alloc_id_counter, 1, __ATOMIC_RELAXED);
+	alloc = aligned_mmap(id, request, TRACKING_ALIGNMENT);
 	if (alloc == NULL)
 		return NULL;
 
 	index = (uintptr_t)alloc / TRACKING_ALIGNMENT;
-	id = __atomic_fetch_add(&alloc_id_counter, 1, __ATOMIC_RELAXED);
 	__atomic_store_n(&info_table[index].id, id, __ATOMIC_RELEASE);
 	__atomic_store_n(&info_table[index].size, request, __ATOMIC_RELEASE);
 	prev = __atomic_exchange_n(&tracked_alloc_table[index], (uintptr_t)alloc,
