@@ -8,6 +8,30 @@ currently only tracks long-lived allocations (e.g., leaks), we plan to
 also implement guard pages, in the spirit of
 [Electric Fence](https://en.wikipedia.org/wiki/Electric_Fence).
 
+The sampling approach makes it possible to use this library in
+production with a minimal impact on performance (see the section on
+Performance overhead), and without any change to code generation,
+unlike, e.g., [LeakSanitizer](https://clang.llvm.org/docs/LeakSanitizer.html)
+or [Valgrind](https://valgrind.org/).
+
+The library's implementation strategy, which offloads most of the
+complexity to the kernel or an external analysis script, and only
+overrides the system memory allocator for the few sampled allocations,
+means the instrumentation is less likely to radically change a
+program's behaviour.  Preloading `libpoireau.so` is much less invasive
+than slotting in, e.g., [tcmalloc](https://github.com/google/tcmalloc)
+only because one wants to debug allocations.  The code base is also
+much smaller, and easier to audit before dropping a new library in
+production.
+
+Finally, rather than scanning the heap for references, the
+`poireau.py` analysis script merely reports old allocations.  For
+application servers, and other workloads that expect to enter a steady
+state quickly after startup, that is *more useful* than only reporting
+unreachable objects: a slow growth in heap footprint is an issue, even
+if the culprits are reachable, e.g., in a list that isn't getting
+cleared when it should be.
+
 How to build libpoireau
 -----------------------
 
@@ -124,6 +148,68 @@ tracking allocator.  This lets us identify calls to `free` and
 USDT events ("this allocation was freed or reallocated"); it also
 ensures we pass these allocations back to the backup tracking
 allocator, rather than the system malloc.
+
+Some synthetic microbenchmarks
+------------------------------
+
+Performance sensitive programs tend to avoid dynamic memory allocation
+in hot spots.  That being said, here are a couple microbenchmark to
+try and upper bound the overhead of `LD_PRELOAD`ing in
+`libpoireau.so`, by repeatedly making pairs of calls to `malloc` and
+`free` (a best case for most memory allocators) in a single thread.
+The results below were timed on an unloaded AMD EPYC 7601 running
+Linux 5.3.11 and glibc 2.27.
+
+Large allocations (1 MB), with a sample period of 32 MB (p = 3.2%):
+
+    baseline (glibc malloc): 0.092 us/malloc-free (0.047 user, 0.046 system)
+        preloaded, no probe: 0.153 us/malloc-free (0.058 user, 0.094 system)
+     preloaded, with probes: 0.236 us/malloc-free (0.067 user, 0.169 system)
+    preloaded, with tracing: 0.271 us/malloc-free (0.069 user, 0.203 system)
+
+This is pretty much our worst case: we expect to trigger allocation
+tracking very frequently, once every 32 allocation, and our tracking
+allocator is slightly more complex than a plain `mmap`/`munmap`
+(something we should still improve).
+
+Mid-sized allocations (16 KB), with a sample period of 32 MB (p = 0.049%):
+
+    baseline (glibc malloc): 0.042 us/malloc-free (0.041 user, 0.001 system)
+        preloaded, no probe: 0.044 us/malloc-free (0.043 user, 0.001 system)
+     preloaded, with probes: 0.046 us/malloc-free (0.042 user, 0.004 system)
+    preloaded, with tracing: 0.054 us/malloc-free (0.042 user, 0.012 system)
+
+At this less unreasonable size, the overhead of diverting sampled
+allocations to a tracking allocator is less that 5%.  We can also
+observe that, while triggering an interrupt whenever we execute a
+tracepoint isn't free, the time spent servicing the interrupt is
+relatively small (< 20%) compared to the time it takes to generate a
+backtrace.  This isn't surprising, since we use the same part of the
+kernel that's exercised when analysing performance issues with `perf`.
+
+Small-sized allocations (128 B), with a sample period of 32 MB (p = 0.00038%):
+
+    baseline (glibc malloc): 0.017 us/malloc-free (0.017 user, 0.000 system)
+        preloaded, no probe: 0.020 us/malloc-free (0.020 user, 0.000 system)
+     preloaded, with probes: 0.020 us/malloc-free (0.020 user, 0.000 system)
+    preloaded, with tracing: 0.020 us/malloc-free (0.020 user, 0.000 system)
+
+Here, all the slowdown is introduced by trampolining from our
+interceptor malloc to the base system malloc.
+
+TL;DR: in allocation microbenchmarks, the overhead of libpoireau
+instrumentation is on the order of 5-20% for small or medium
+allocations, and goes up to ~70% for very large allocations.
+
+Enabling allocation tracing adds another 0-20% for small or medium
+allocations, and ~130% for very large allocations.
+
+These are worst-case figures, for a program that does *nothing* but
+repeatedly `malloc` and `free` in a loop.  In practice, a performance
+sensitive program hopefully spends less than 10% of its time in memory
+management (and much less than that in large allocations), which means
+the total overhead introduced by libpoireau and capturing stack traces
+is probably closer to 1-5%.
 
 Vendored dependencies
 ---------------------

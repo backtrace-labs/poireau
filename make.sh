@@ -5,10 +5,12 @@ SRC="$BASE/src"
 
 SOURCES="$SRC/sample.c $SRC/shim.c $SRC/tracked_alloc.c"
 
+LIB_SOURCES="$SRC/shim.c"
+
 ${CC:-cc} -std=gnu11 -D_GNU_SOURCE -g -ggdb -O2 -fPIC -W -Wall \
 	  -flto -fvisibility=hidden -fno-semantic-interposition\
 	  -ftls-model=initial-exec -I"$SRC" -isystem "$BASE/" $CFLAGS \
-	  $SOURCES \
+	  $SOURCES $LIB_SOURCE \
 	  -ldl -lm --shared -o libpoireau.so
 
 if [ ! -z "$BUILD_TESTS" ];

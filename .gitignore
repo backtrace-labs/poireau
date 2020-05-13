@@ -5,3 +5,4 @@
 *.swo
 libpoireau.so
 test_*
+!*.c
