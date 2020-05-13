@@ -1,0 +1,7 @@
+SPDXVersion: SPDX-2.0
+DataLicense: CC0-1.0
+Creator: Backtrace I/O
+PackageName: poireau
+PackageOriginator: Backtrace I/O
+PackageHomePage: https://github.com/backtrace-labs/poireau
+PackageLicenseDeclared: MIT
