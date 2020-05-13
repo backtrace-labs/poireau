@@ -1,0 +1,6 @@
+*.o
+*~
+#*#
+*.swp
+*.swo
+libpoireau.so
