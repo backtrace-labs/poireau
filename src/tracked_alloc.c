@@ -10,6 +10,10 @@
 
 #define PAGE_SIZE 4096ULL
 
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
 static uint64_t alloc_id_counter = 1;
 
 /**
@@ -109,6 +113,76 @@ tracked_alloc_get(size_t request, uint64_t *OUT_id)
 
 	*OUT_id = id;
 	return alloc;
+}
+
+static void
+shrink_mapping(void *ptr, size_t current, size_t desired)
+{
+	uintptr_t begin = (uintptr_t)ptr;
+	uintptr_t end = (begin + current + PAGE_SIZE - 1) & -PAGE_SIZE;
+	uintptr_t desired_end = (begin + desired + PAGE_SIZE - 1) & -PAGE_SIZE;
+	int r;
+
+	if (end == desired_end)
+		return;
+
+	r = munmap((void *)desired_end, end - desired_end);
+	assert(r == 0 && "Shrink munmap failed.");
+	return;
+}
+
+static bool
+grow_mapping(void *ptr, size_t current, size_t desired)
+{
+	uintptr_t begin = (uintptr_t)ptr;
+	uintptr_t end = (begin + current + PAGE_SIZE - 1) & -PAGE_SIZE;
+	uintptr_t desired_end = (begin + desired + PAGE_SIZE - 1) & -PAGE_SIZE;
+	void *ret;
+
+	if (end == desired_end)
+		return true;
+
+	ret = mmap((void *)end, desired_end - end,
+		  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED_NOREPLACE,
+		  -1, 0);
+
+	if (ret == MAP_FAILED)
+		return false;
+
+	if (ret != (void *)end) {
+		int r;
+
+		r = munmap(ret, desired_end - end);
+		assert(r == 0 && "Cleanup growth munmap failed.");
+		return false;
+	}
+
+	return true;
+}
+
+bool
+tracked_alloc_resize(void *ptr, size_t request)
+{
+	struct tracked_alloc_info info;
+	size_t index = (uintptr_t)ptr / TRACKING_ALIGNMENT;
+	bool r;
+
+	info = tracked_alloc_info(ptr);
+	if (request == info.size)
+		return true;
+
+	if (request < info.size) {
+		shrink_mapping(ptr, info.size, request);
+		r = true;
+	} else {
+		r = grow_mapping(ptr, info.size, request);
+	}
+
+	if (r == true)
+		__atomic_store_n(&info_table[index].size, request,
+		    __ATOMIC_RELEASE);
+
+	return r;
 }
 
 struct tracked_alloc_info

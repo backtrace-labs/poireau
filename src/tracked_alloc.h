@@ -65,6 +65,13 @@ tracked_alloc_p(const void *ptr)
  */
 void *tracked_alloc_get(size_t request, uint64_t *OUT_id);
 
+/**
+ * Attempts to resize the allocation in `ptr` to `request`.
+ *
+ * Returns true on success; may fail for any reason.
+ */
+bool tracked_alloc_resize(void *ptr, size_t request);
+
 struct tracked_alloc_info tracked_alloc_info(const void *);
 
 void tracked_alloc_put(void *);

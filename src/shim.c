@@ -146,12 +146,18 @@ sampled_realloc_from_tracked(void *ptr, size_t request)
 	void *ret;
 
 	info = tracked_alloc_info(ptr);
-	ret = tracked_alloc_get(request, &new_id);
+	if (tracked_alloc_resize(ptr, request)) {
+		ret = ptr;
+		new_id = info.id;
+	} else {
+		ret = tracked_alloc_get(request, &new_id);
+	}
+
 	DTRACE_PROBE6(libpoireau, realloc_from_tracked,
 	    info.id, ptr, info.size,
 	    new_id, ret, request);
 
-	if (ret == NULL)
+	if (ret == NULL || ret == ptr)
 		return ret;
 
 	memcpy(ret, ptr, (info.size < request) ? info.size : request);
