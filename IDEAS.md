@@ -54,6 +54,8 @@ Improve usability
 
 ### Consider a small command shell in poireau.py
 
+### Let poireau.py ingest stack trace patterns for known leaks
+
 ### Report a random number + pid in tracepoints
 
 ### Hook posix_memalign, etc.
