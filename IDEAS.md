@@ -58,7 +58,11 @@ Improve usability
 
 ### Report a random number + pid in tracepoints
 
+### Hook malloc-adjacent utilities like malloc_usable_size
+
 ### Hook posix_memalign, etc.
+
+### Hook jemalloc/tcmalloc/etc. extensions
 
 ### Investigate need for fork hooks
 
