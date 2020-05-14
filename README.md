@@ -16,7 +16,8 @@ or [Valgrind](https://valgrind.org/).
 
 The library's implementation strategy, which offloads most of the
 complexity to the kernel or an external analysis script, and only
-overrides the system memory allocator for the few sampled allocations,
+overrides the system memory allocator (or any other allocator that
+already overrides the system malloc) for the few sampled allocations,
 means the instrumentation is less likely to radically change a
 program's behaviour.  Preloading `libpoireau.so` is much less invasive
 than slotting in, e.g., [tcmalloc](https://github.com/google/tcmalloc)
