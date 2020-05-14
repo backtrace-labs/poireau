@@ -49,7 +49,7 @@ sample_request(struct sample_state *state, size_t request)
 {
 	bool ret;
 
-#ifdef __GCC_ASM_FLAG_OUTPUTS__
+#if defined(__GCC_ASM_FLAG_OUTPUTS__) && defined(__x86_64__)
 	/*
 	 * Subtract the request from bytes_until_next_sample.  Sample
 	 * if the result borrowed or is zero: that means
