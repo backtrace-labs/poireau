@@ -216,7 +216,7 @@ Vendored dependencies
 ---------------------
 
 libpoireau includes code derived from
-[xoroshiro 256+ 1.0](http://prng.di.unimi.it/xoshiro256plus.c),
+[xoshiro 256+ 1.0](http://prng.di.unimi.it/xoshiro256plus.c),
 written in 2018 by David Blackman and Sebastiano Vigna (vigna@acm.org)
 and [dedicated to the public domain](http://creativecommons.org/publicdomain/zero/1.0/).
 
