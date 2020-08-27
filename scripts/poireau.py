@@ -87,6 +87,12 @@ EVENT_PATTERN = re.compile(
     r"^\s*([0-9]+\.[0-9]*) (.*)/([0-9]+) (.*:.*[(].*[)])$", flags=re.ASCII
 )
 
+# 10332315.769 coronerd/110/12310 sdt_libpoireau:calloc:(7f7951f584f6) arg1=1 arg2=144 arg3=655 arg4=11957188952064 arg5=144
+NEW_EVENT_PATTERN = re.compile(
+    r"^(\s*[0-9]+\.[0-9]* .*/[0-9]+ .*:.*):\(([0-9a-f]+)\) ((arg[1-9]+=.+)*)$",
+    flags=re.ASCII,
+)
+
 
 def parse_event(line):
     """Expects a new event line line
@@ -97,6 +103,15 @@ def parse_event(line):
     The timestamp is converted to seconds.
     """
     match = EVENT_PATTERN.fullmatch(line)
+    # New format... perf trace isn't exactly ABI stable.
+    if match is None:
+        match = NEW_EVENT_PATTERN.fullmatch(line)
+        if match:
+            args = ["__probe_ip=" + str(int(match[2], 16))] + match[3].split()
+            args = [param.replace("=", ": ") for param in args]
+            line = match[1] + "(" + ", ".join(args) + ")"
+
+            match = EVENT_PATTERN.fullmatch(line)
     if match is None:
         print("Unhandled line: %s" % line, file=sys.stderr)
         return None
