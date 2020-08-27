@@ -320,6 +320,8 @@ Allocation = namedtuple(
     ],
 )
 
+EMPTY_ALLOCATION = Allocation(*([None] * 8))
+
 # We map allocations to buckets by dividing by 1 GB.
 ALLOCATION_BUCKET_GRANULARITY = 1 << 30
 
@@ -356,9 +358,10 @@ def assert_present_bucket(key, event):
 
 def observe_alloc(event):
     call = event.call
-    key = call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
-    alloc = Allocation(
-        call.new_ptr, call.new_size, event.ts, event.stack, None, None, None, None
+    key = call.new_id  # call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
+    alloc = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
+    alloc = alloc._replace(
+        ptr=call.new_ptr, size=call.new_size, first_ts=event.ts, first_stack=event.stack
     )
     assert_empty_bucket(key, alloc)
     ALLOCATIONS[key] = alloc
@@ -366,27 +369,22 @@ def observe_alloc(event):
 
 def observe_free(event):
     call = event.call
-    key = call.old_ptr // ALLOCATION_BUCKET_GRANULARITY
+    key = call.old_id  # call.old_ptr // ALLOCATION_BUCKET_GRANULARITY
     assert_present_bucket(key, event)
-    current = ALLOCATIONS.get(key, None)
-    if current:
-        ALLOCATIONS[key] = current._replace(free_ts=event.ts, free_stack=event.stack)
+    current = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
+    ALLOCATIONS[key] = current._replace(free_ts=event.ts, free_stack=event.stack)
 
 
 def observe_realloc(event):
     call = event.call
-    key = call.old_ptr // ALLOCATION_BUCKET_GRANULARITY
-    assert key == call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
+    key = call.old_id  # old_ptr // ALLOCATION_BUCKET_GRANULARITY
+    assert key == call.new_id  # call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
 
     assert_present_bucket(key, event)
-    current = ALLOCATIONS.get(key, None)
-    if current:
-        ALLOCATIONS[key] = current._replace(
-            ptr=call.new_ptr,
-            size=call.new_size,
-            last_ts=event.ts,
-            last_stack=event.stack,
-        )
+    current = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
+    ALLOCATIONS[key] = current._replace(
+        ptr=call.new_ptr, size=call.new_size, last_ts=event.ts, last_stack=event.stack,
+    )
 
 
 def observe_events(events):
