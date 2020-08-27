@@ -160,6 +160,21 @@ grow_mapping(void *ptr, size_t current, size_t desired)
 	if (end == desired_end)
 		return true;
 
+	/*
+	 * Try to grow the current mapping in place.
+	 *
+	 * MAP_FIXED_NOREPLACE asks the kernel to fail if there isn't
+	 * enough empty space at `end`: unlike MAP_FIXED, existing
+	 * mappings are left as is.
+	 *
+	 * If the kernel does not implement MAP_FIXED_NOREPLACE, it
+	 * may instead hand us a different address; we will immediately
+	 * remove the mapping and return with failure.
+	 *
+	 * With or without MAP_FIXED_NOREPLACE, we only succeed if the
+	 * new mapping immediately follows the current one, and
+	 * otherwise do not leave any new mapping around.
+	 */
 	ret = mmap((void *)end, desired_end - end,
 		  PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_FIXED_NOREPLACE,
 		  -1, 0);
