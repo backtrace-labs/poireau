@@ -12,5 +12,5 @@ else
 fi
 
 sudo ${PERF:-perf} trace -T $TARGET \
-     -e sdt_libpoireau:* --call-graph=dwarf 2>&1 |  \
+     -e sdt_libpoireau:* --call-graph=dwarf --sort-events 2>&1 |  \
     "${BASE}/poireau.py"
