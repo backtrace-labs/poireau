@@ -1,13 +1,27 @@
 #include "sample.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
-#include <sys/random.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "cc.h"
 
 /* SPDX-License-Identifier: MIT AND CC0-1.0 */
+
+/*
+ * Linux added the getrandom syscall in 3.17, but glibc only recently
+ * added a wrapper.  Define our own getrandom.
+ */
+static ssize_t
+getrandom_compat(void *buf, size_t buflen, unsigned int flags)
+{
+
+        return syscall(SYS_getrandom, buf, buflen, flags);
+}
 
 /*
  * We use xoshiro256+ 1.0 to generate floating point uniform variates.
@@ -59,14 +73,16 @@ xoshiro_next(struct sample_state *state)
 static COLD bool
 maybe_initialize_xoshiro(struct sample_state *state)
 {
-	int r;
+	ssize_t r;
 
 	for (size_t i = 0; i < sizeof(state->s) / sizeof(state->s[0]); i++)
 		if (state->s[i] != 0)
 			return false;
 
-	r = getentropy(state->s, sizeof(state->s));
-	assert(r == 0 && "getentropy failed");
+	do {
+		r = getrandom_compat(state->s, sizeof(state->s), /*flags=*/0);
+	} while (r < 0 && errno == EINTR);
+	assert(r > 0 && "getrandom failed");
 	return true;
 }
 
