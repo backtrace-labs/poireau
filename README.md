@@ -90,8 +90,25 @@ to only ingest events from programs that match a certain regex).
 System-wide tracing makes it easier to track events that happen
 immediately on program startup.
 
-How to cleanup after enabling libpoireau
-----------------------------------------
+TL;DR:
+
+1. Register `libpoireau`'s tracepoints with `perf buildid-cache --add`
+   and `perf probe`.
+2. Prepare your program to run with libpoireau.so instrumentation, e.g., with `LD_PRELOAD=/path/to/libpoireau.so`.
+3. Grab libpoireau tracepoint events by doing one of:
+   a. Start the instrumented program and run `scripts/poireau.sh $PROGRAM_PID`.
+   b. Edit the `COMM` pattern in `scripts/poireau.py` before running `scripts/poireau.sh`, then start the instrumented program.
+4. Wait for `poireau.sh` to report stacks for long-lived (> five minutes)
+   sampled allocations, every ten minutes.
+
+Interact with `poireau.py` with signals:
+
+- `SIGHUP`: prints stacks for all live sampled allocations.
+- `SIGUSR1`: prints stacks for all old sampled allocations and stop reporting them in the future.
+- `SIGUSR2`: prints stacks for all recent calls to `free` or `realloc`.
+
+How to clean up after enabling libpoireau
+-----------------------------------------
 
 Disable the tracepoints with
 
