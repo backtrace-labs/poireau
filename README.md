@@ -79,7 +79,7 @@ off chance that it will help debug a use-after-free.
 Perf often needs `sudo` access, but it doesn't make sense to run all
 of `poireau.py` as root; `poireau.sh` instead executes only `perf`
 with sudo.  In order to override the `perf` binary under `sudo`,
-use `PERF=`which perf` scripts/poireau.sh ...`.
+use ``PERF=`which perf` scripts/poireau.sh ...``.
 
 You may also enable system-wide tracing by invoking `poireau.sh`
 without any argument.  This is mostly useful if only one process at a
@@ -100,6 +100,9 @@ TL;DR:
    b. Edit the `COMM` pattern in `scripts/poireau.py` before running `scripts/poireau.sh`, then start the instrumented program.
 4. Wait for `poireau.sh` to report stacks for long-lived (> five minutes)
    sampled allocations, every ten minutes.
+5. Packages for `perf` can be wonky. Try to build from source and point
+   `poireau.sh` to custom executables by setting ``PERF=`which perf` ``
+   before running `poireau.sh`.
 
 Interact with `poireau.py` with signals:
 
