@@ -96,8 +96,11 @@ TL;DR:
    and `perf probe`.
 2. Prepare your program to run with libpoireau.so instrumentation, e.g., with `LD_PRELOAD=/path/to/libpoireau.so`.
 3. Grab libpoireau tracepoint events by doing one of:
+
    a. Start the instrumented program and run `scripts/poireau.sh $PROGRAM_PID`.
+
    b. Edit the `COMM` pattern in `scripts/poireau.py` before running `scripts/poireau.sh`, then start the instrumented program.
+
 4. Wait for `poireau.sh` to report stacks for long-lived (> five minutes)
    sampled allocations, every ten minutes.
 5. Packages for `perf` can be wonky. Try to build from source and point
