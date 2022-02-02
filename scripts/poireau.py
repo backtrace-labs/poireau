@@ -52,6 +52,13 @@ static tracepoints to figure out their meaning).
 
 After that comes the backtrace, which is apparently is a symbol
 followed by a path in parentheses.
+
+The parser is also compatible with the output of `perf script`.
+We can thus run a command under `perf record`, e.g.,
+
+`perf record -T -e sdt_libpoireau:* --call-graph=dwarf -- ./profilee`,
+
+and analyse offline with `perf script | ./poireau.py`.
 """
 from collections import defaultdict, namedtuple
 from datetime import datetime
@@ -89,7 +96,13 @@ EVENT_PATTERN = re.compile(
 
 # 10332315.769 coronerd/110/12310 sdt_libpoireau:calloc:(7f7951f584f6) arg1=1 arg2=144 arg3=655 arg4=11957188952064 arg5=144
 NEW_EVENT_PATTERN = re.compile(
-    r"^(\s*[0-9]+\.[0-9]* .*/[0-9]+ .*:.*):\(([0-9a-f]+)\) ((arg[1-9]+=.+)*)$",
+    r"^(\s*[0-9]+\.[0-9]* .*/[0-9]+ .*:.*):\(([0-9a-f]+)\) ((arg[1-9][0-9]*=.+)*)$",
+    flags=re.ASCII,
+)
+
+# coronerd/38 31909 [009] 627769.713769:               sdt_libpoireau:malloc: (7f4d353bd14d) arg1=8493 arg2=14291503677440 arg3=436
+SCRIPT_EVENT_PATTERN = re.compile(
+    r"^\s*(.*/[0-9]+) ([0-9]+) [[][0-9]+[]] ([0-9]+.[0-9]+):\s*(.*:.*):\s*\(([0-9a-f]+)\) ((arg[1-9][0-9]*=.+)*)$",
     flags=re.ASCII,
 )
 
@@ -106,6 +119,11 @@ def parse_event(line):
     # New format... perf trace isn't exactly ABI stable.
     if match is None:
         match = NEW_EVENT_PATTERN.fullmatch(line)
+        if not match:
+            match = SCRIPT_EVENT_PATTERN.fullmatch(line)
+            if match:
+                line = f"{match[3]} {match[1]}/{match[2]} {match[4]}:({match[5]}) {match[6]}"
+                match = NEW_EVENT_PATTERN.fullmatch(line)
         if match:
             args = ["__probe_ip=" + str(int(match[2], 16))] + match[3].split()
             args = [param.replace("=", ": ") for param in args]
@@ -120,14 +138,22 @@ def parse_event(line):
 
 FRAME_PATTERN = re.compile(r"^\s*([^0-9.].*) [(](.*)[)]$", flags=re.ASCII)
 
+TRACE_FRAME_PATTERN = re.compile(
+    r"^\s*[0-9a-f]{4,}\s+([^0-9.].*?)(:?[+]0x[0-9a-f]+)? [(](.*)[)]$", flags=re.ASCII
+)
+
 
 def parse_frame(line):
     """Expects a backtrace frame line like
     '                                       _crdb_column_open (/opt/backtrace/sbin/coronerd)'
+    or
+    '            7f4d353bd14d sampled_malloc+0x59 (/opt/backtrace/lib/libpoireau.so)'
     and returns a tuple of the symbol and path, or none if the line
     does not look like a stack trace frame.
     """
-    match = FRAME_PATTERN.fullmatch(line)
+    match = TRACE_FRAME_PATTERN.fullmatch(line)
+    if match is None:
+        match = FRAME_PATTERN.fullmatch(line)
     if match is None:
         return None
     return Frame(match[1], match[2])
