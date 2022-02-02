@@ -70,11 +70,27 @@ import time
 
 # SPDX-License-Identifier: MIT
 
+# Do we want to track sampled allocs when we hit the max heap footprint?
+TRACK_HIGH_WATER_MARK = False
+
+# If we do track sampled allocs, what's the minimum size we want
+# before reporting anything?
+TRACK_HIGH_WATER_MARK_AFTER = 0
+if len(sys.argv) > 1 and sys.argv[1] == "--track-high-water-mark":
+    TRACK_HIGH_WATER_MARK = True
+    del sys.argv[1]
+    if len(sys.argv) > 1 and sys.argv[1].isdigit():
+        TRACK_HIGH_WATER_MARK_AFTER = int(sys.argv[1])
+        del sys.argv[1]
+
 # When reading from stdin, assume the records come from the same
 # machine in real time, and we can use the monotonic clock to know the
 # age of allocations.
 RECORDS_MATCH_REAL_TIME = len(sys.argv) <= 1 or sys.argv[1] == "-"
 
+
+# Assume libpoireau is configured to the default sampling period (32 MB).
+ALLOCATION_SAMPLING_BYTE_PERIOD = 32 << 20
 
 # Only track events with a comm (executable) that matches this pattern.
 COMM_PATTERN = re.compile(".*")
@@ -358,6 +374,41 @@ ALLOCATIONS = dict()
 # Updated with the max timestamp we ever observed
 LAST_EVENT = 0
 
+# Estimate for the heap size in ALLOCATIONS
+ESTIMATED_ALLOCATIONS_FOOTPRINT = 0
+
+# Max for the heap size in ALLOCATIONS
+ALLOCATIONS_HIGH_WATER_MARK = 0
+
+# Updated with a list of live sampled allocations whenever we increase
+# ALLOCATIONS_HIGH_WATER_MARK.
+ALLOCATIONS_AT_HIGH_WATER_MARK = []
+
+
+def estimate_allocation_size(alloc):
+    """Estimates the actual allocation size that this sample represents.
+    This is a very rough and biased estimate, but simple and hopefully
+    enough to pinpoint memory bloat.
+    """
+    if not alloc.size:
+        return 0
+    return max(alloc.size, ALLOCATION_SAMPLING_BYTE_PERIOD)
+
+
+def check_high_water_mark():
+    global ALLOCATIONS_AT_HIGH_WATER_MARK, ALLOCATIONS_HIGH_WATER_MARK
+    if (
+        not TRACK_HIGH_WATER_MARK
+        or ALLOCATIONS_HIGH_WATER_MARK >= ESTIMATED_ALLOCATIONS_FOOTPRINT
+    ):
+        return
+    ALLOCATIONS_HIGH_WATER_MARK = ESTIMATED_ALLOCATIONS_FOOTPRINT
+    ALLOCATIONS_AT_HIGH_WATER_MARK = [
+        record for record in ALLOCATIONS.values() if not record.free_ts
+    ]
+    if ALLOCATIONS_HIGH_WATER_MARK >= TRACK_HIGH_WATER_MARK_AFTER:
+        print_allocations_at_high_water_mark(True)
+
 
 def assert_empty_bucket(key, alloc):
     current = ALLOCATIONS.get(key, None)
@@ -383,6 +434,7 @@ def assert_present_bucket(key, event):
 
 
 def observe_alloc(event):
+    global ESTIMATED_ALLOCATIONS_FOOTPRINT
     call = event.call
     key = call.new_id  # call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
     alloc = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
@@ -391,26 +443,36 @@ def observe_alloc(event):
     )
     assert_empty_bucket(key, alloc)
     ALLOCATIONS[key] = alloc
+    ESTIMATED_ALLOCATIONS_FOOTPRINT += estimate_allocation_size(alloc)
+    check_high_water_mark()
 
 
 def observe_free(event):
+    global ESTIMATED_ALLOCATIONS_FOOTPRINT
     call = event.call
     key = call.old_id  # call.old_ptr // ALLOCATION_BUCKET_GRANULARITY
     assert_present_bucket(key, event)
     current = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
     ALLOCATIONS[key] = current._replace(free_ts=event.ts, free_stack=event.stack)
+    ESTIMATED_ALLOCATIONS_FOOTPRINT -= estimate_allocation_size(current)
+    check_high_water_mark()
 
 
 def observe_realloc(event):
+    global ESTIMATED_ALLOCATIONS_FOOTPRINT
     call = event.call
     key = call.old_id  # old_ptr // ALLOCATION_BUCKET_GRANULARITY
     assert key == call.new_id  # call.new_ptr // ALLOCATION_BUCKET_GRANULARITY
 
     assert_present_bucket(key, event)
     current = ALLOCATIONS.get(key, EMPTY_ALLOCATION)
-    ALLOCATIONS[key] = current._replace(
+    new = current._replace(
         ptr=call.new_ptr, size=call.new_size, last_ts=event.ts, last_stack=event.stack,
     )
+    ALLOCATIONS[key] = new
+    ESTIMATED_ALLOCATIONS_FOOTPRINT -= estimate_allocation_size(current)
+    ESTIMATED_ALLOCATIONS_FOOTPRINT += estimate_allocation_size(new)
+    check_high_water_mark()
 
 
 def observe_events(events):
@@ -497,6 +559,44 @@ def print_dalloc(alloc):
 IGNORED_ALLOCS = set()
 
 
+def print_allocations_at_high_water_mark(new_record):
+    """Prints allocations in `allocs`, which should represent a set of
+    allocations with a large aggregate footprint.
+
+    Ignores any allocation that's already in IGNORED_ALLOCS; populates
+    that set with all current allocations if mark_ignored is True.
+
+    """
+    if not TRACK_HIGH_WATER_MARK or not ALLOCATIONS_AT_HIGH_WATER_MARK:
+        return
+    if RECORDS_MATCH_REAL_TIME:
+        now = time.monotonic()
+        print(
+            "%s allocations at %s high water mark %f MB"
+            % (
+                datetime.utcnow().isoformat(),
+                "new" if new_record else "current",
+                ALLOCATIONS_HIGH_WATER_MARK / (1 << 20),
+            )
+        )
+    else:
+        now = LAST_EVENT
+        print(
+            "allocations at %s high water mark %f MB"
+            % (
+                "new" if new_record else "current",
+                ALLOCATIONS_HIGH_WATER_MARK / (1 << 20),
+            )
+        )
+
+    # Print large allocations first.
+    for alloc in sorted(
+        ALLOCATIONS_AT_HIGH_WATER_MARK, key=lambda x: x.size, reverse=True
+    ):
+        if alloc.free_ts is None and alloc not in IGNORED_ALLOCS:
+            print_alloc(alloc, now)
+
+
 def print_old_allocs(allocs, max_age, max_stale=None, mark_ignored=False):
     """Prints allocations older than max_age.
 
@@ -564,6 +664,7 @@ INITIAL_REPORT_DELAY = 30
 def hup_handler(signum=None, frame=None):
     """On SIGHUP, print all current allocations."""
     print_old_allocs(ALLOCATIONS.values(), 0, max_stale=0)
+    print_allocations_at_high_water_mark(False)
 
 
 def usr1_handler(signum=None, frame=None):
