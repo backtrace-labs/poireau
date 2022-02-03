@@ -130,6 +130,31 @@ If you had to edit an init script to insert the `LD_PRELOAD` variable
 before executing a program, it makes sense to undo the edit and
 restart the instrumented program as soon as possible.
 
+Advanced usage
+--------------
+
+You can override the default sample rate (every 32 MB on average) by
+setting the `POIREAU_SAMPLE_PERIOD_BYTES` to a positive sample rate
+in bytes.
+
+Poireau can also be used to take a snapshot of live sampled
+allocations (and print it) whenever the estimated heap footprint
+reaches a new high water mark.  Simply pass a
+`--track-high-water-mark` argument to `poireau.py`; `poireau.sh`
+consumes the first argument if any and passes the rest to
+`poireau.py`.  For system-wide tracing, pass `*` as the first argument
+to `poireau.sh`.
+
+The `poireau.py` analysis script accepts a second positional argument
+after `--track-high-water-mark`: that's the minimum size (in bytes)
+at which it will report live sampled allocations.
+
+Poireau can also be used with `perf record` for short-lived tasks;
+that's particularly useful with high water mark heap profiling.  First
+record `perf.data` with `perf record -T -e std_libpoireau:*
+--call-graph=dwarf -- ./profilee ...`, then pipe the data to analysis with
+`perf script | ./poireau.py ...`.
+
 How does it work?
 -----------------
 
