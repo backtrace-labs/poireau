@@ -44,7 +44,7 @@ static __thread struct sample_state sample_state;
 	static __typeof__(F) dummy_##F;				\
 	static __typeof__(F) *volatile base_##F = dummy_##F;	\
 
-FOREACH_WRAPPED(REDIRECT);
+FOREACH_WRAPPED(REDIRECT)
 #undef REDIRECT
 
 /*
