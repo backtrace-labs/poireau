@@ -63,6 +63,7 @@ and analyse offline with `perf script | ./poireau.py`.
 from collections import defaultdict, namedtuple
 from datetime import datetime
 import fileinput
+import os
 import re
 import sys
 import signal
@@ -89,8 +90,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "--track-high-water-mark":
 RECORDS_MATCH_REAL_TIME = len(sys.argv) <= 1 or sys.argv[1] == "-"
 
 
-# Assume libpoireau is configured to the default sampling period (32 MB).
-ALLOCATION_SAMPLING_BYTE_PERIOD = 32 << 20
+# Assume libpoireau is configured with the same environment, or the
+# default sampling period (32 MB).
+ALLOCATION_SAMPLING_BYTE_PERIOD = os.environ.get("POIREAU_SAMPLE_PERIOD_BYTES", 32 << 20)
 
 # Only track events with a comm (executable) that matches this pattern.
 COMM_PATTERN = re.compile(".*")

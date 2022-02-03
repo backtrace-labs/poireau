@@ -9,9 +9,16 @@
 /* SPDX-License-Identifier: MIT */
 
 /**
- * Attempt to sample roughly every 32 MB of allocated bytes.
+ * Attempt to sample roughly every 32 MB of allocated bytes by
+ * default.
  */
-static const double sample_period = (1UL << 25);
+#define DEFAULT_SAMPLE_PERIOD (1UL << 25)
+
+/**
+ * Fetch the runtime-defined allocation sample period from this
+ * environment variable.
+ */
+#define SAMPLE_PERIOD_ENV_VAR "POIREAU_SAMPLE_PERIOD_BYTES"
 
 /**
  * Each thread should have a zero-initialised sample state struct.
@@ -20,7 +27,6 @@ struct sample_state {
 	uint64_t s[4];
 	size_t bytes_until_next_sample;
 };
-
 
 /**
  * Determines whether this allocation request should be sampled.

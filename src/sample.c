@@ -4,6 +4,8 @@
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -11,6 +13,65 @@
 #include "cc.h"
 
 /* SPDX-License-Identifier: MIT AND CC0-1.0 */
+
+static union atomic_f64 {
+	double f;
+	uint64_t u;
+} sample_period = {
+	.f = DEFAULT_SAMPLE_PERIOD,
+};
+
+static inline double
+get_sample_period(void)
+{
+	union atomic_f64 period;
+
+	period.u = __atomic_load_n(&sample_period.u, __ATOMIC_RELAXED);
+	return period.f;
+}
+
+/*
+ * Initialise `sample_period` in a constructor, rather than lazily
+ * (when a memory allocation function is invoked) because the parsing
+ * code uses non-async-signal-safe functionality.
+ */
+static __attribute__((__constructor__)) void
+initialise_sample_period(void)
+{
+	const char *period_str;
+	char *end_ptr;
+	union atomic_f64 period;
+
+	period_str = getenv(SAMPLE_PERIOD_ENV_VAR);
+	if (period_str == NULL)
+		return;
+
+	period.f = strtod(period_str, &end_ptr);
+	if (*end_ptr != '\0') {
+		if (getenv("POIREAU_QUIET") != NULL) {
+			dprintf(STDERR_FILENO,
+			    "libpoireau failed to parse %s=%s. defaulting to %f. Define POIREAU_QUIET to silence this warning.\n",
+			    SAMPLE_PERIOD_ENV_VAR, period_str,
+			    (double)DEFAULT_SAMPLE_PERIOD);
+		}
+
+		period.f = DEFAULT_SAMPLE_PERIOD;
+	}
+
+	if (period.f <= 0 || isinf(period.f) || isnan(period.f)) {
+		if (getenv("POIREAU_QUIET") != NULL) {
+			dprintf(STDERR_FILENO,
+			    "libpoireau found invalid %s=%f. defaulting to %f. Define POIREAU_QUIET to silence this warning.\n",
+			    SAMPLE_PERIOD_ENV_VAR, period.f,
+			    (double)DEFAULT_SAMPLE_PERIOD);
+		}
+
+		period.f = DEFAULT_SAMPLE_PERIOD;
+	}
+
+	__atomic_store_n(&sample_period.u, period.u, __ATOMIC_RELAXED);
+	return;
+}
 
 /*
  * Linux added the getrandom syscall in 3.17, but glibc only recently
@@ -20,7 +81,7 @@ static ssize_t
 getrandom_compat(void *buf, size_t buflen, unsigned int flags)
 {
 
-        return syscall(SYS_getrandom, buf, buflen, flags);
+	return syscall(SYS_getrandom, buf, buflen, flags);
 }
 
 /*
@@ -133,12 +194,14 @@ sample_exponential(struct sample_state *state, double mean, bool *newly_initiali
 bool
 sample_request_reset(struct sample_state *state)
 {
+	double period;
 
+	period = get_sample_period();
 	do {
 		bool newly_initialized = false;
 
 		state->bytes_until_next_sample =
-		    sample_exponential(state, sample_period, &newly_initialized);
+		    sample_exponential(state, period, &newly_initialized);
 		/*
 		 * If we just initialised the state, we must test
 		 * against the real threshold we just wrote in
